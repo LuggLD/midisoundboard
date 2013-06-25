@@ -3,29 +3,12 @@ import pygame.midi
 from pygame.locals import *
 from time import sleep
 
-class soundsfx:
-    def __init__(self, mysound, midikey, ltype, name, options):
-        self.mysound = mysound
-        self.midikey = midikey
-        self.ltype = ltype
-        self.name = name
-        self.options = options
-        
-class soundsdb:
-    def __init__(self):
-        self.data = []
-    def add(self, soundobj):
-        self.data.append(soundobj)
-    def delete(self, soundobj):
-        self.data.remove(soundobj)
-    def writeout(self):
-        pass
-    def load(self, filename):
-        self.data = soundsdbparse(filename)
-        
-def soundsdbparse(filename):
-    return []
-
+def find_channel(channelmap):
+    for c in channelmap:
+        if channelmap[c] == None:
+            chan = c
+            break
+    return chan
 
 #### HERE STARTS THE MEAT
 ####
@@ -59,27 +42,38 @@ pygame.mixer.set_num_channels(32)
 pygame.display.set_caption("MIDI Test")
 screen = pygame.display.set_mode((640, 480), RESIZABLE, 32)
 
-sound1 = soundsfx(pygame.mixer.Sound("sword1.wav"), "48", 'oneshot', 'Sword', False)
-
-scene = soundsdb()
-scene.add(sound1)
-
+# Set custom event codes:
 ev_end_oneshot = pygame.USEREVENT+1
 ev_end_looping = pygame.USEREVENT+2
 ev_end_interval = pygame.USEREVENT+3
 ev_pressnote = pygame.USEREVENT+4
 
+# Prepare data for testing purposes. Later here: Load data from config files.
 assignednotes = {}
-assignednotes[48] = {'sound':pygame.mixer.Sound("sword1.wav"),
+assignednotes[48] = {'sound':pygame.mixer.Sound("sword1.wav"), # 48 is the midi note for the standard C key
                      'type':'oneshot', # oneshot, looping, or interval
-                     'name':'sword clang',
-                     'options':[], # tbd
-                     'status':0,   # 0: not playing; 1: currently playing
-                     'channel':[], # list of which channels are currently playing this sound
-                     'maxchannels':4 
+                     'name':'Sword Clang',
+                     'options':[4], # tbd - current use: maxchannels for oneshot
                      } 
+assignednotes[50] = {'sound':pygame.mixer.Sound("rocket.wav"), 
+                     'type':'oneshot', 
+                     'name':'Rocket Explosion',
+                     'options':[2], 
+                     } 
+assignednotes[52] = {'sound':pygame.mixer.Sound("sonarping.wav"),
+                     'type':'looping',
+                     'name':'Sonar Ping',
+                     'options':[], # tbd for looping
+                     }
+assignednotes[53] = {'sound':pygame.mixer.Sound("attack.wav"),
+                     'type':'interval',
+                     'name':'Sword Hit',
+                     'options':[], # tbd for interval
+                     }
 
-channels = range(pygame.mixer.get_num_channels())
+channelmap = {} # format: [Channel (int)]:[Note (int)]
+for i in range(pygame.mixer.get_num_channels()):
+    channelmap[i] = None
 
 print "Starting..."
 active = True
@@ -97,17 +91,8 @@ while active:
             e.code will return the channel which threw the event, i.e. where the sound finished playing.
             Find out which sound was assigned to that channel, and reset its status. (How?)
             '''
-            for note in iter(assignednotes):
-                if e.code in assignednotes[note]['channel']:
-                    print 'Note', note, 'just finished on channel', e.code
-                    assignednotes[note]['channel'].remove(e.code)
-                    channels.append(int(e.code))
-                    print 'Freeing up channel', e.code
-                    
-                    if assignednotes[note]['channel'] == []:
-                        assignednotes[note]['status'] = 0
-                        print 'Note status reset to 0'
-                    else: print 'Note status:', assignednotes[note]['status']
+            print 'Releasing channel', e.code
+            channelmap[e.code] = None
                     
         if e.type == ev_end_looping:
             '''
@@ -136,33 +121,34 @@ while active:
             if e.note in assignednotes:
                 note = assignednotes[e.note]
                 
-                if len(note['channel']) < note['maxchannels']: # revert this to == 0 later!
-                    if note['type'] == 'oneshot':
+                if note['type'] == 'oneshot':
+                    # check how often the sound is playing
+                    note_concurrent_instances = 0
+                    for n in channelmap:
+                        if channelmap[n] != None and channelmap[n] == e.note:
+                            note_concurrent_instances += 1
+                    
+                    if note_concurrent_instances < note['options'][0]:
+                        # find free channel:
+                        chan = find_channel(channelmap)
                         
-                        chan = channels.pop(0)
-                        note['channel'].append(chan)
-                        
-                        print 'Playing sound "' + note['name'] + '" on channel ' + str(note['channel'])
-                        
+                        # now play sound on that channel
+                        print 'Playing sound "' + note['name'] + '" on channel ' + str(chan)
                         pygame.mixer.Channel(chan).queue(note['sound'])
-                        note['status'] = 1
-                        print 'Note status:', note['status']
-                        print 'Note channels:', note['channel']
-                        
+                        channelmap[chan] = e.note
                         pygame.mixer.Channel(chan).set_endevent(ev_end_oneshot)
                     
-                    if note['type'] == 'looping':
-                        print "Looped sounds not implemented yet"
-                    
-                    if note['type'] == 'interval':
-                        print "Interval sounds not implemented yet"
+                if note['type'] == 'looping':
+                    print "Looped sounds not implemented yet"
+                
+                if note['type'] == 'interval':
+                    print "Interval sounds not implemented yet"
                 
             else:
                 '''
                 Open dialog to assign new note to this key
                 '''
                 print "Unassigned key. Key setup tbd."
-                pass 
     
     # Check for new MIDI events:
             
